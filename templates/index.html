@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>股票分析系統</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      font-size: 20px;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    input, select, button {
+      margin: 5px;
+      padding: 8px;
+      font-size: 18px;
+    }
+    /* 自動補全下拉 */
+    .autocomplete-wrapper {
+      position: relative;
+      display: inline-block;
+    }
+    #symbol_suggestions {
+      max-width: 300px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      border: 1px solid #ccc;
+      border-top: none;
+      position: absolute;
+      background: #fff;
+      z-index: 100;
+    }
+    #symbol_suggestions li {
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+    #symbol_suggestions li:hover {
+      background: #f0f0f0;
+    }
+    img { max-width: 100%; display: block; margin: 20px 0; }
+    pre {
+      background: #f4f4f4;
+      padding: 10px;
+      font-size: 18px;
+      overflow-x: auto;
+    }
+    .result-section { margin-top: 20px; }
+    .result-section h2 { font-size: 24px; margin-bottom: 10px; }
+    .result-section h3 { font-size: 22px; margin: 12px 0 6px; }
+    .result-section p { font-size: 20px; margin: 8px 0; }
+    .result-section ul { list-style: none; padding: 0; }
+    .result-section li { font-size: 18px; margin-left: 20px; }
+  </style>
+</head>
+<body>
+  <h1>📈 股票分析系統</h1>
+
+  <form id="analyzeForm" autocomplete="off">
+    <div class="autocomplete-wrapper">
+      <label>股票代號：
+        <input type="text" id="symbol" required>
+      </label>
+      <ul id="symbol_suggestions"></ul>
+    </div><br>
+
+    <label>資料區間：
+      <select id="date_mode">
+        <option value="range">起訖日期</option>
+        <option value="year">最近幾年</option>
+        <option value="all">從上市</option>
+      </select>
+    </label><br>
+
+    <div id="date_range">
+      起：<input type="date" id="start_date">
+      訖：<input type="date" id="end_date"><br>
+    </div>
+    <div id="year_range" style="display:none">
+      最近幾年：<input type="number" id="years" value="3" min="1"><br>
+    </div>
+
+    <label>資料頻率：
+      <select id="interval">
+        <option value="1d">日資料</option>
+        <option value="1wk">週資料</option>
+        <option value="1mo">月資料</option>
+      </select>
+    </label><br>
+
+    <button type="submit">開始分析</button>
+    <button type="button" id="exportCsv">匯出CSV</button>
+  </form>
+
+  <div id="result" class="result-section"></div>
+
+  <script>
+    // 切換日期輸入區塊
+    document.getElementById('date_mode').addEventListener('change', e => {
+      document.getElementById('date_range').style.display = e.target.value==='range'?'block':'none';
+      document.getElementById('year_range').style.display = e.target.value==='year'?'block':'none';
+    });
+
+    // 股票代號自動補全
+    const symbolInput = document.getElementById('symbol');
+    const sugBox      = document.getElementById('symbol_suggestions');
+    let lastQ = '';
+    symbolInput.addEventListener('input', async () => {
+      const q = symbolInput.value.trim();
+      sugBox.innerHTML = '';
+      if (q.length<2 || q===lastQ) return;
+      lastQ = q;
+      try {
+        const res = await fetch(`/autocomplete?q=${encodeURIComponent(q)}`);
+        const items = await res.json();
+        items.slice(0,5).forEach(it=>{
+          const li = document.createElement('li');
+          li.textContent = `${it.symbol}  ${it.name || ''}`;
+          li.addEventListener('click',()=>{
+            symbolInput.value = it.symbol;
+            sugBox.innerHTML = '';
+          });
+          sugBox.appendChild(li);
+        });
+      } catch(e){ console.warn('Autocomplete error', e); }
+    });
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.autocomplete-wrapper')) sugBox.innerHTML = '';
+    });
+
+    // 參數整理
+    function gatherParams(){
+      const symbol    = symbolInput.value.trim();
+      const date_mode = document.getElementById('date_mode').value;
+      const interval  = document.getElementById('interval').value;
+      let start_date, end_date, years;
+      if(date_mode==='range'){
+        start_date = document.getElementById('start_date').value;
+        end_date   = document.getElementById('end_date').value;
+      } else if (date_mode==='year'){
+        years = document.getElementById('years').value;
+      }
+      return {symbol,date_mode,start_date,end_date,years,interval};
+    }
+
+    // 開始分析
+    document.getElementById('analyzeForm').addEventListener('submit',async e=>{
+      e.preventDefault();
+      document.getElementById('result').innerHTML = '<p>📊 分析中...</p>';
+      const params = gatherParams();
+      try {
+        const res = await fetch('/analyze',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(params)
+        });
+        const data = await res.json();
+        if(data.error){
+          document.getElementById('result').innerHTML = `<p style="color:red;">錯誤：${data.error}</p>`;
+          return;
+        }
+        let html = `<h2>${params.symbol} 分析結果</h2>`;
+        html += `<h3>每年波動度</h3><pre>${JSON.stringify(data.volatility,null,2)}</pre>`;
+        html += `<h3>每年累積報酬率</h3><ul>`;
+        Object.entries(data.annual_returns).forEach(([y,v])=>{
+          html+=`<li>${y}：${(v*100).toFixed(2)}%</li>`;
+        });
+        html+=`</ul><p><strong>年平均累積報酬率：</strong>${(data.avg_return*100).toFixed(2)}%</p>`;
+        html+=`<p><strong>最大回測：</strong>${(data.max_drawdown*100).toFixed(2)}%</p>`;  
+        html+=`<p><strong>Sharpe Ratio：</strong>${data.sharpe_ratio.toFixed(2)}</p>`;  
+        html+=`<p><strong>Alpha：</strong>${data.alpha!==null?data.alpha.toFixed(4):'N/A'}</p>`;  
+        html+=`<p><strong>Beta：</strong>${data.beta!==null?data.beta.toFixed(4):'N/A'}</p>`;  
+        html+=`<img src="data:image/png;base64,${data.nav_img}" alt="NAV 圖">`;  
+        document.getElementById('result').innerHTML = html;
+      } catch(err){
+        document.getElementById('result').innerHTML = `<p style="color:red;">例外：${err.message}</p>`;
+      }
+    });
+
+    // 匯出 CSV
+    document.getElementById('exportCsv').addEventListener('click',async ()=>{
+      const params = gatherParams();
+      try {
+        const res = await fetch('/export',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(params)
+        });
+        if(!res.ok) throw new Error('匯出失敗');
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `${params.symbol}_history.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch(e){
+        alert('匯出失敗：'+e.message);
+      }
+    });
+  </script>
+</body>
+</html>
