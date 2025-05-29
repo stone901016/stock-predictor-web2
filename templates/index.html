@@ -15,7 +15,6 @@
       padding: 8px;
       font-size: 18px;
     }
-    /* 自動補全下拉 */
     .autocomplete-wrapper {
       position: relative;
       display: inline-block;
@@ -95,7 +94,7 @@
   <div id="result" class="result-section"></div>
 
   <script>
-    // 切換日期輸入區塊
+    // 切換日期輸入
     document.getElementById('date_mode').addEventListener('change', e => {
       document.getElementById('date_range').style.display = e.target.value==='range'?'block':'none';
       document.getElementById('year_range').style.display = e.target.value==='year'?'block':'none';
@@ -103,7 +102,7 @@
 
     // 股票代號自動補全
     const symbolInput = document.getElementById('symbol');
-    const sugBox      = document.getElementById('symbol_suggestions');
+    const sugBox = document.getElementById('symbol_suggestions');
     let lastQ = '';
     symbolInput.addEventListener('input', async () => {
       const q = symbolInput.value.trim();
@@ -113,10 +112,10 @@
       try {
         const res = await fetch(`/autocomplete?q=${encodeURIComponent(q)}`);
         const items = await res.json();
-        items.slice(0,5).forEach(it=>{
+        items.slice(0,5).forEach(it => {
           const li = document.createElement('li');
           li.textContent = `${it.symbol}  ${it.name || ''}`;
-          li.addEventListener('click',()=>{
+          li.addEventListener('click', () => {
             symbolInput.value = it.symbol;
             sugBox.innerHTML = '';
           });
@@ -128,7 +127,6 @@
       if (!e.target.closest('.autocomplete-wrapper')) sugBox.innerHTML = '';
     });
 
-    // 參數整理
     function gatherParams(){
       const symbol    = symbolInput.value.trim();
       const date_mode = document.getElementById('date_mode').value;
@@ -137,22 +135,22 @@
       if(date_mode==='range'){
         start_date = document.getElementById('start_date').value;
         end_date   = document.getElementById('end_date').value;
-      } else if (date_mode==='year'){
+      } else if(date_mode==='year'){
         years = document.getElementById('years').value;
       }
       return {symbol,date_mode,start_date,end_date,years,interval};
     }
 
     // 開始分析
-    document.getElementById('analyzeForm').addEventListener('submit',async e=>{
+    document.getElementById('analyzeForm').addEventListener('submit', async e => {
       e.preventDefault();
       document.getElementById('result').innerHTML = '<p>📊 分析中...</p>';
       const params = gatherParams();
       try {
-        const res = await fetch('/analyze',{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify(params)
+        const res = await fetch('/analyze', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(params)
         });
         const data = await res.json();
         if(data.error){
@@ -160,28 +158,28 @@
           return;
         }
         let html = `<h2>${params.symbol} 分析結果</h2>`;
-        html += `<h3>每年波動度</h3><pre>${JSON.stringify(data.volatility,null,2)}</pre>`;
+        html += `<p><strong>平均波動度：</strong>${(data.volatility_avg*100).toFixed(2)}%</p>`;
         html += `<h3>每年累積報酬率</h3><ul>`;
-        Object.entries(data.annual_returns).forEach(([y,v])=>{
-          html+=`<li>${y}：${(v*100).toFixed(2)}%</li>`;
+        Object.entries(data.annual_returns).forEach(([y,v]) => {
+          html += `<li>${y}：${(v*100).toFixed(2)}%</li>`;
         });
-        html+=`</ul><p><strong>年平均累積報酬率：</strong>${(data.avg_return*100).toFixed(2)}%</p>`;
-        html+=`<p><strong>最大回測：</strong>${(data.max_drawdown*100).toFixed(2)}%</p>`;  
-        html+=`<p><strong>Sharpe Ratio：</strong>${data.sharpe_ratio.toFixed(2)}</p>`;  
-        html+=`<p><strong>Alpha：</strong>${data.alpha!==null?data.alpha.toFixed(4):'N/A'}</p>`;  
-        html+=`<p><strong>Beta：</strong>${data.beta!==null?data.beta.toFixed(4):'N/A'}</p>`;  
-        html+=`<img src="data:image/png;base64,${data.nav_img}" alt="NAV 圖">`;  
+        html += `</ul><p><strong>年平均累積報酬率：</strong>${(data.avg_return*100).toFixed(2)}%</p>`;
+        html += `<p><strong>最大回測：</strong>${(data.max_drawdown*100).toFixed(2)}%</p>`;
+        html += `<p><strong>Sharpe Ratio：</strong>${data.sharpe_ratio.toFixed(2)}</p>`;
+        html += `<p><strong>Alpha：</strong>${data.alpha!==null?data.alpha.toFixed(4):'N/A'}</p>`;
+        html += `<p><strong>Beta：</strong>${data.beta!==null?data.beta.toFixed(4):'N/A'}</p>`;
+        html += `<img src="data:image/png;base64,${data.nav_img}" alt="NAV 圖">`;
         document.getElementById('result').innerHTML = html;
       } catch(err){
-        document.getElementById('result').innerHTML = `<p style="color:red;">例外：${err.message}</p>`;
+        document.getElementById('result').innerHTML = `<p style="color:red;">錯誤：${err.message}</p>`;
       }
     });
 
     // 匯出 CSV
-    document.getElementById('exportCsv').addEventListener('click',async ()=>{
+    document.getElementById('exportCsv').addEventListener('click', async () => {
       const params = gatherParams();
       try {
-        const res = await fetch('/export',{
+        const res = await fetch('/export', {
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify(params)
@@ -191,12 +189,12 @@
         const url  = URL.createObjectURL(blob);
         const a    = document.createElement('a');
         a.href     = url;
-        a.download = `${params.symbol}_history.csv`;
+        a.download = `${params.symbol}_history_with_analysis.csv`;
         document.body.appendChild(a);
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
-      } catch(e){
+      } catch(e) {
         alert('匯出失敗：'+e.message);
       }
     });
