@@ -142,7 +142,7 @@ def analyze():
 @app.route('/export', methods=['POST'])
 def export():
     data = request.get_json()
-    # 同 analyze 計算日期
+    # 計算時間區間
     symbol    = data.get('symbol')
     date_mode = data.get('date_mode')
     interval  = data.get('interval')
@@ -157,12 +157,14 @@ def export():
         start_date = '1990-01-01'
         end_date   = pd.Timestamp.today().strftime('%Y-%m-%d')
 
+    # 歷史股價
     df = yf.download(symbol, start=start_date, end=end_date, interval=interval)
     df.columns = [col[0] if isinstance(col,tuple) else col for col in df.columns]
     df.columns = [c.strip() for c in df.columns]
     if 'Adj Close' not in df.columns:
         cands = [c for c in df.columns if 'close' in c.lower()]
-        df['Adj Close'] = df[cands[0]] if cands else None
+        if cands:
+            df['Adj Close'] = df[cands[0]]
 
     df['Return'] = df['Adj Close'].pct_change()
     df['Year']   = df.index.year
@@ -174,28 +176,27 @@ def export():
     max_dd         = float(dd.min().round(4))
     sharpe         = float(((df['Return'].mean() * 252) / (df['Return'].std() * np.sqrt(252))) if df['Return'].std() else 0)
 
+    # 打包 CSV
     hist_csv = df.to_csv(encoding='utf-8-sig')
     lines = []
-    lines.append('')
     lines.append('Metric,Value')
     lines.append(f'VolatilityAvg,{volatility_avg:.4f}')
     lines.append('')
     lines.append('Year,AnnualReturn')
-    for y in annual_returns.index:
-        lines.append(f'{y},{annual_returns.loc[y]:.4f}')
+    for y, val in annual_returns.items():
+        lines.append(f'{y},{val:.4f}')
     lines.append('')
     lines.append(f'AverageReturn,{avg_return:.4f}')
     lines.append(f'MaxDrawdown,{max_dd:.4f}')
     lines.append(f'SharpeRatio,{sharpe:.4f}')
-    lines.append(f'Alpha,{alpha:.4f}' if alpha is not None else 'Alpha,')
-    lines.append(f'Beta,{beta:.4f}' if beta is not None else 'Beta,')
-    metrics_csv = '\n'.join(lines)
+    # 移除 Alpha/Beta 匯出，避免參數未定義問題
 
+    metrics_csv = '\n'.join(lines)
     full_csv = hist_csv + '\n' + metrics_csv
 
     resp = make_response(full_csv)
     resp.headers['Content-Type']        = 'text/csv; charset=utf-8'
-    resp.headers['Content-Disposition'] = f'attachment; filename={symbol}_history_with_analysis.csv'
+    resp.headers['Content-Disposition'] = f'attachment; filename={symbol}_history_analysis.csv'
     return resp
 
 if __name__ == '__main__':
