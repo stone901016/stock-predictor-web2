@@ -65,16 +65,16 @@ def analyze():
             if df['Adj Close'] is None:
                 return jsonify({'error': f"無可用的 'Adj Close'，目前欄位：{df.columns.tolist()}"}), 400
 
-        # 指標計算
+        # 計算報酬率
         df['Return'] = df['Adj Close'].pct_change()
-        df['Year']   = df.index.year
 
-        # 每年累積報酬率
+        # 全期間平均波動度
+        volatility_avg = float((df['Return'].std() * np.sqrt(252)).round(4))
+
+        # 每年累積報酬率 & 平均報酬
+        df['Year'] = df.index.year
         annual_returns = df.groupby('Year')['Return'].apply(lambda r: (r.add(1).prod() - 1))
-        avg_return     = float(annual_returns.sum() / len(annual_returns))
-
-        # 每年波動率
-        volatility = (df.groupby('Year')['Return'].std() * np.sqrt(252)).round(4)
+        avg_return     = float(annual_returns.mean().round(4))
 
         # 最大回測
         cum   = (1 + df['Return'].fillna(0)).cumprod()
@@ -84,7 +84,7 @@ def analyze():
         # Sharpe
         sharpe = float(((df['Return'].mean() * 252) / (df['Return'].std() * np.sqrt(252))) if df['Return'].std() else 0)
 
-        # 市場指數
+        # 市場指數選擇
         sym = symbol.upper()
         if sym.endswith('.TW'):
             mkt_ix = '^TWII'
@@ -106,11 +106,11 @@ def analyze():
         mkt['Return'] = mkt[retcol].pct_change()
 
         idx = df['Return'].dropna().index.intersection(mkt['Return'].dropna().index)
-        cov = np.cov(df.loc[idx, 'Return'], mkt.loc[idx, 'Return'])
-        beta  = float(cov[0,1]/cov[1,1]) if cov[1,1] else None
-        alpha = float((df['Return'].mean() - beta*mkt['Return'].mean())*252) if beta else None
+        cov  = np.cov(df.loc[idx, 'Return'], mkt.loc[idx, 'Return'])
+        beta = float(cov[0,1] / cov[1,1]) if cov[1,1] else None
+        alpha = float((df['Return'].mean() - beta * mkt['Return'].mean()) * 252) if beta else None
 
-        # 繪製 NAV 圖
+        # NAV 圖
         plt.rcParams.update({'font.size': 12})
         fig, ax = plt.subplots(figsize=(10,4))
         cum.plot(ax=ax)
@@ -126,7 +126,7 @@ def analyze():
         nav_img = base64.b64encode(buf.getvalue()).decode()
 
         return jsonify({
-            'volatility'     : volatility.to_dict(),
+            'volatility_avg' : volatility_avg,
             'annual_returns' : {int(y): round(v,4) for y,v in annual_returns.items()},
             'avg_return'     : round(avg_return,4),
             'max_drawdown'   : max_dd,
@@ -142,7 +142,7 @@ def analyze():
 @app.route('/export', methods=['POST'])
 def export():
     data = request.get_json()
-    # 與 analyze 同樣計算日期
+    # 同 analyze 計算日期
     symbol    = data.get('symbol')
     date_mode = data.get('date_mode')
     interval  = data.get('interval')
@@ -157,34 +157,32 @@ def export():
         start_date = '1990-01-01'
         end_date   = pd.Timestamp.today().strftime('%Y-%m-%d')
 
-    # 歷史股價
     df = yf.download(symbol, start=start_date, end=end_date, interval=interval)
     df.columns = [col[0] if isinstance(col,tuple) else col for col in df.columns]
     df.columns = [c.strip() for c in df.columns]
-    # 確保有 Adj Close
     if 'Adj Close' not in df.columns:
         cands = [c for c in df.columns if 'close' in c.lower()]
-        if cands:
-            df['Adj Close'] = df[cands[0]]
+        df['Adj Close'] = df[cands[0]] if cands else None
 
-    # 分析指標
     df['Return'] = df['Adj Close'].pct_change()
     df['Year']   = df.index.year
     annual_returns = df.groupby('Year')['Return'].apply(lambda r: (r.add(1).prod() - 1))
-    avg_return     = float(annual_returns.sum() / len(annual_returns))
-    volatility     = (df.groupby('Year')['Return'].std() * np.sqrt(252)).round(4)
+    avg_return     = float(annual_returns.mean().round(4))
+    volatility_avg = float((df['Return'].std() * np.sqrt(252)).round(4))
     cum            = (1 + df['Return'].fillna(0)).cumprod()
     dd             = (cum - cum.cummax()) / cum.cummax()
     max_dd         = float(dd.min().round(4))
     sharpe         = float(((df['Return'].mean() * 252) / (df['Return'].std() * np.sqrt(252))) if df['Return'].std() else 0)
 
-    # 建立 CSV 文字
     hist_csv = df.to_csv(encoding='utf-8-sig')
     lines = []
     lines.append('')
-    lines.append('Year,Volatility,AnnualReturn')
-    for y in volatility.index:
-        lines.append(f'{y},{volatility.loc[y]:.4f},{annual_returns.loc[y]:.4f}')
+    lines.append('Metric,Value')
+    lines.append(f'VolatilityAvg,{volatility_avg:.4f}')
+    lines.append('')
+    lines.append('Year,AnnualReturn')
+    for y in annual_returns.index:
+        lines.append(f'{y},{annual_returns.loc[y]:.4f}')
     lines.append('')
     lines.append(f'AverageReturn,{avg_return:.4f}')
     lines.append(f'MaxDrawdown,{max_dd:.4f}')
